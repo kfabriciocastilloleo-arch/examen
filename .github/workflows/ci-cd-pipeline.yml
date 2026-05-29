@@ -31,6 +31,7 @@ jobs:
       infra: ${{ steps.filter.outputs.infra }}
       docs-only: ${{ steps.filter.outputs.docs-only }}
       changed-components: ${{ steps.set-matrix.outputs.changed }}
+      has-code-changes: ${{ steps.set-matrix.outputs.has-code }}
 
     steps:
       - uses: actions/checkout@v4.2.2
@@ -56,20 +57,25 @@ jobs:
         run: |
           FRONTEND="${{ steps.filter.outputs.frontend }}"
           BACKEND="${{ steps.filter.outputs.backend }}"
-          if [ "$FRONTEND" = "true" ] && [ "$BACKEND" = "true" ]; then
-            echo 'changed=["frontend","backend"]' >> "$GITHUB_OUTPUT"
-          elif [ "$FRONTEND" = "true" ]; then
-            echo 'changed=["frontend"]' >> "$GITHUB_OUTPUT"
-          elif [ "$BACKEND" = "true" ]; then
-            echo 'changed=["backend"]' >> "$GITHUB_OUTPUT"
+
+          if [ "$FRONTEND" = "true" ] || [ "$BACKEND" = "true" ]; then
+            echo 'has-code=true' >> "$GITHUB_OUTPUT"
+            if [ "$FRONTEND" = "true" ] && [ "$BACKEND" = "true" ]; then
+              echo 'changed=["frontend","backend"]' >> "$GITHUB_OUTPUT"
+            elif [ "$FRONTEND" = "true" ]; then
+              echo 'changed=["frontend"]' >> "$GITHUB_OUTPUT"
+            else
+              echo 'changed=["backend"]' >> "$GITHUB_OUTPUT"
+            fi
           else
-            echo 'changed=[]' >> "$GITHUB_OUTPUT"
+            echo 'has-code=false' >> "$GITHUB_OUTPUT"
+            echo 'changed=["_skip"]' >> "$GITHUB_OUTPUT"
           fi
 
   validate:
     name: Validate ${{ matrix.component }}
     needs: [detect-changes]
-    if: needs.detect-changes.outputs.docs-only != 'true'
+    if: needs.detect-changes.outputs.has-code-changes == 'true'
     strategy:
       matrix:
         component: ${{ fromJSON(needs.detect-changes.outputs.changed-components) }}
@@ -81,7 +87,7 @@ jobs:
   test:
     name: Test ${{ matrix.component }} (${{ matrix.os }}, Node ${{ matrix.node-version }})
     needs: [detect-changes]
-    if: needs.detect-changes.outputs.docs-only != 'true'
+    if: needs.detect-changes.outputs.has-code-changes == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -99,7 +105,7 @@ jobs:
   compile:
     name: Build ${{ matrix.component }}
     needs: [detect-changes, test, validate]
-    if: needs.detect-changes.outputs.docs-only != 'true'
+    if: needs.detect-changes.outputs.has-code-changes == 'true'
     strategy:
       matrix:
         component: ${{ fromJSON(needs.detect-changes.outputs.changed-components) }}
@@ -112,7 +118,7 @@ jobs:
   deploy-staging:
     name: Deploy to staging
     needs: [compile, detect-changes]
-    if: github.ref == 'refs/heads/main' && needs.detect-changes.outputs.docs-only != 'true' && (needs.detect-changes.outputs.frontend == 'true' || needs.detect-changes.outputs.backend == 'true')
+    if: github.ref == 'refs/heads/main' && needs.detect-changes.outputs.has-code-changes == 'true'
     environment:
       name: staging
       url: https://staging.example.com
