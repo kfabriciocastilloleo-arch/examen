@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "scripts": {
     "test": "echo 'Running backend tests...'",
-    "build": "echo 'Building backend...'",
+    "build": "mkdir -p dist && echo 'Building backend...' > dist/index.js",
     "lint": "echo 'Linting backend...'"
   }
 }
