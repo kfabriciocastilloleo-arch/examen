@@ -1,82 +1,36 @@
-# Setup Guide — Configuración necesaria en GitHub
+# Setup Guide — Configuración en GitHub
 
-## 1. Secrets (Settings > Secrets and variables > Actions)
+## ✅ Ya creado vía API
 
-### Repository secrets
-
-| Secret | Valor | Uso |
+| Recurso | Nombre | Ámbito |
 |---|---|---|
-| `CODECOV_TOKEN` | Token de Codecov | Subir cobertura en reusable-testing.yml |
+| Secret | `CODECOV_TOKEN` | Repositorio |
+| Secret | `STAGING_API_KEY` | Environment staging |
+| Secret | `PROD_API_KEY` | Environment production |
+| Variable | `NODE_VERSION = 20` | Repositorio |
+| Environment | `staging` | branch_policy: main |
+| Environment | `production` | wait_timer: 10min, branch_policy: main |
 
-### Environment secrets
+## ⚠️ Pendiente de crear manualmente
 
-Crear environments y sus secrets:
-
-**Staging:**
+### 1. Required reviewers (production)
 ```
-Settings > Environments > staging
-  - STAGING_API_KEY
-```
-
-**Production:**
-```
-Settings > Environments > production
-  - PROD_API_KEY
-  - ✓ Required reviewers (devops-leads, security-team)
-  - ✓ Wait timer (10 minutes)
-  - ✓ Deployment branches (main)
+Settings > Environments > production > Protection rules
+  → Add "Required reviewers"
+  → Seleccionar usuarios/teams (ej: devops-leads, security-team)
 ```
 
----
-
-## 2. Variables (Settings > Secrets and variables > Actions)
-
-| Variable | Valor | Uso |
-|---|---|---|
-| `NODE_VERSION` | `20` | Versión de Node por defecto |
-
----
-
-## 3. Environments (Settings > Environments)
-
-### Staging
-
-```yaml
-name: staging
-url: https://staging.example.com
-deployment_branch: main
-protected: false
+### 2. Self-hosted runners
+```
+Settings > Actions > Runners > Add runner
+  → Crear grupos: production (label: prod), staging (label: staging)
+  → Ambos con label: self-hosted, linux
 ```
 
-### Production
-
-```yaml
-name: production
-url: https://production.example.com
-deployment_branch: main
-protected: true
-required_reviewers:
-  - devops-leads
-  - security-team
-wait_timer: 10
+### 3. Branch protection (main)
 ```
-
----
-
-## 4. Self-hosted runners (Settings > Actions > Runners)
-
-Configurar runners con labels:
-
-| Runner Group | Labels | Repos |
-|---|---|---|
-| production | `self-hosted, linux, prod` | examen |
-| staging | `self-hosted, linux, staging` | examen |
-
----
-
-## 5. Branch protection (Settings > Branches > Add rule)
-
-- Branch: `main`
-- ✓ Require pull request reviews
-- ✓ Require status checks (ci-cd-pipeline)
-- ✓ Require conversation resolution
+Settings > Branches > Add rule
+  → Branch: main
+  → ✓ Require a pull request before merging
+  → ✓ Require status checks (ci-cd-pipeline)
+```
