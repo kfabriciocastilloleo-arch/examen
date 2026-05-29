@@ -19,9 +19,6 @@ env:
   NODE_VERSION: "20"
 
 jobs:
-  # ──────────────────────────────────────────────
-  #  CHANGES DETECTION — Selective Execution
-  # ──────────────────────────────────────────────
   detect-changes:
     name: Detect changed components
     runs-on: ubuntu-latest
@@ -33,6 +30,7 @@ jobs:
       backend: ${{ steps.filter.outputs.backend }}
       infra: ${{ steps.filter.outputs.infra }}
       docs-only: ${{ steps.filter.outputs.docs-only }}
+      changed-components: ${{ steps.set-matrix.outputs.changed }}
 
     steps:
       - uses: actions/checkout@v4.2.2
@@ -53,50 +51,43 @@ jobs:
             docs-only:
               - 'docs/**'
 
-  # ──────────────────────────────────────────────
-  #  VALIDATIONS via Reusable Workflow
-  # ──────────────────────────────────────────────
+      - name: Build dynamic matrix
+        id: set-matrix
+        run: |
+          FRONTEND="${{ steps.filter.outputs.frontend }}"
+          BACKEND="${{ steps.filter.outputs.backend }}"
+          if [ "$FRONTEND" = "true" ] && [ "$BACKEND" = "true" ]; then
+            echo 'changed=["frontend","backend"]' >> "$GITHUB_OUTPUT"
+          elif [ "$FRONTEND" = "true" ]; then
+            echo 'changed=["frontend"]' >> "$GITHUB_OUTPUT"
+          elif [ "$BACKEND" = "true" ]; then
+            echo 'changed=["backend"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'changed=[]' >> "$GITHUB_OUTPUT"
+          fi
+
   validate:
     name: Validate ${{ matrix.component }}
     needs: [detect-changes]
-    if: needs.detect-changes.outputs.docs-only != 'true' && needs.detect-changes.outputs[matrix.component] == 'true'
+    if: needs.detect-changes.outputs.docs-only != 'true'
     strategy:
       matrix:
-        component:
-          - frontend
-          - backend
+        component: ${{ fromJSON(needs.detect-changes.outputs.changed-components) }}
     uses: ./.github/workflows/reusable-validations.yml
     with:
       component: ${{ matrix.component }}
       lint-enabled: true
 
-  # ──────────────────────────────────────────────
-  #  TESTING — Matrix Strategy (OS x Node)
-  # ──────────────────────────────────────────────
   test:
     name: Test ${{ matrix.component }} (${{ matrix.os }}, Node ${{ matrix.node-version }})
     needs: [detect-changes]
-    if: needs.detect-changes.outputs.docs-only != 'true' && needs.detect-changes.outputs[matrix.component] == 'true'
+    if: needs.detect-changes.outputs.docs-only != 'true'
     strategy:
       fail-fast: false
       matrix:
-        component:
-          - frontend
-          - backend
-        os:
-          - ubuntu-latest
-          - windows-latest
-        node-version:
-          - "18"
-          - "20"
-        include:
-          - os: ubuntu-latest
-            node-version: "22"
-            component: backend
-        exclude:
-          - os: windows-latest
-            node-version: "18"
-            component: frontend
+        component: ${{ fromJSON(needs.detect-changes.outputs.changed-components) }}
+        os: [ubuntu-latest, windows-latest]
+        node-version: ["18", "20", "22"]
     uses: ./.github/workflows/reusable-testing.yml
     with:
       component: ${{ matrix.component }}
@@ -105,27 +96,19 @@ jobs:
     secrets:
       codecov-token: ${{ secrets.CODECOV_TOKEN }}
 
-  # ──────────────────────────────────────────────
-  #  COMPILATION / BUILD
-  # ──────────────────────────────────────────────
   compile:
     name: Build ${{ matrix.component }}
     needs: [detect-changes, test, validate]
-    if: needs.detect-changes.outputs.docs-only != 'true' && needs.detect-changes.outputs[matrix.component] == 'true'
+    if: needs.detect-changes.outputs.docs-only != 'true'
     strategy:
       matrix:
-        component:
-          - frontend
-          - backend
+        component: ${{ fromJSON(needs.detect-changes.outputs.changed-components) }}
     uses: ./.github/workflows/reusable-compilation.yml
     with:
       component: ${{ matrix.component }}
       os: ubuntu-latest
       node-version: "20"
 
-  # ──────────────────────────────────────────────
-  #  DEPLOY — Staging
-  # ──────────────────────────────────────────────
   deploy-staging:
     name: Deploy to staging
     needs: [compile, detect-changes]
@@ -144,9 +127,6 @@ jobs:
       - name: Deploy to staging
         run: echo "Deploying to staging environment..."
 
-  # ──────────────────────────────────────────────
-  #  DEPLOY — Production (requires approval)
-  # ──────────────────────────────────────────────
   deploy-production:
     name: Deploy to production
     needs: [deploy-staging, detect-changes]
@@ -165,9 +145,6 @@ jobs:
       - name: Deploy to production
         run: echo "Deploying to production environment..."
 
-  # ──────────────────────────────────────────────
-  #  REPORTING — Markdown Summary
-  # ──────────────────────────────────────────────
   report:
     name: Generate pipeline summary
     needs: [detect-changes, test, compile, deploy-staging]
@@ -190,10 +167,10 @@ jobs:
           - Docs only: ${{ needs.detect-changes.outputs.docs-only }}
 
           ## Test Results
-          ${{ needs.test.result == 'success' && '✅ All tests passed' || '❌ Some tests failed' }}
+          ${{ needs.test.result == 'success' && 'Tests passed' || 'Tests failed' }}
 
           ## Build Status
-          ${{ needs.compile.result == 'success' && '✅ Builds successful' || '❌ Build failed' }}
+          ${{ needs.compile.result == 'success' && 'Builds successful' || 'Build failed' }}
 
           ## Deployments
           - Staging: ${{ needs.deploy-staging.result }}

@@ -2,40 +2,51 @@
 
 ## Matrix Strategy
 
-La pipeline principal implementa una matriz multidimensional:
+### Dynamic matrix con selective execution
+
+La pipeline usa `fromJSON` para generar la matriz dinámicamente según los componentes modificados:
 
 ```yaml
 test:
   strategy:
     fail-fast: false
     matrix:
-      component: [frontend, backend]
+      component: ${{ fromJSON(needs.detect-changes.outputs.changed-components) }}
       os: [ubuntu-latest, windows-latest]
-      node-version: [18, 20]
-      include:
-        - os: ubuntu-latest
-          node-version: "22"
-          component: backend
-      exclude:
-        - os: windows-latest
-          node-version: "18"
-          component: frontend
+      node-version: ["18", "20", "22"]
 ```
 
-### Combinaciones generadas
+Si `detect-changes` detecta cambios solo en `frontend`, la matriz se resuelve como:
 
-| # | Component | OS | Node |
-|---|---|---|---|
-| 1 | frontend | ubuntu-latest | 18 |
-| 2 | frontend | ubuntu-latest | 20 |
-| 3 | frontend | windows-latest | 20 |
-| 4 | backend | ubuntu-latest | 18 |
-| 5 | backend | ubuntu-latest | 20 |
-| 6 | backend | ubuntu-latest | 22 (include) |
-| 7 | backend | windows-latest | 18 |
-| 8 | backend | windows-latest | 20 |
+```yaml
+matrix:
+  component: [frontend]
+  os: [ubuntu-latest, windows-latest]
+  node-version: ["18", "20", "22"]
+```
 
-Total: **8 jobs** (se excluyó frontend + windows + node 18)
+Generando **6 jobs**: frontend × (ubuntu, windows) × (18, 20, 22)
+
+### Include / Exclude (demostración conceptual)
+
+GitHub Actions también permite control manual:
+
+```yaml
+matrix:
+  component: [frontend, backend]
+  os: [ubuntu-latest, windows-latest]
+  node: [18, 20]
+  include:
+    - os: ubuntu-latest
+      node: "22"
+      component: backend
+  exclude:
+    - os: windows-latest
+      node: "18"
+      component: frontend
+```
+
+Esto generaría 8 combinaciones específicas.
 
 ---
 
@@ -59,12 +70,11 @@ concurrency:
 ```
 
 - Agrupa ejecuciones por workflow + branch
-- Cancela ejecuciones previdas del mismo grupo (ahorra recursos)
+- Cancela ejecuciones previas del mismo grupo
 - Previene despliegues concurrentes sobre el mismo entorno
 
 ### Reutilización lógica
 - Reusable workflows para testing, compilation y validations
-- Shared GitHub Actions locales (`.github/actions/`) para lógica común
 - Variables de entorno (`NODE_VERSION`) centralizadas
 
 ---
@@ -84,10 +94,10 @@ El job `report` genera un resumen automático que GitHub muestra en la UI:
 - Docs only: false
 
 ## Test Results
-✅ All tests passed
+Tests passed
 
 ## Build Status
-✅ Builds successful
+Builds successful
 
 ## Deployments
 - Staging: success
