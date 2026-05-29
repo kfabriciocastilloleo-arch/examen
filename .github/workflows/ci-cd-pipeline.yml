@@ -1,0 +1,207 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "20"
+
+jobs:
+  # ──────────────────────────────────────────────
+  #  CHANGES DETECTION — Selective Execution
+  # ──────────────────────────────────────────────
+  detect-changes:
+    name: Detect changed components
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+      backend: ${{ steps.filter.outputs.backend }}
+      infra: ${{ steps.filter.outputs.infra }}
+      docs-only: ${{ steps.filter.outputs.docs-only }}
+
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: dorny/paths-filter@v3.0.2
+        id: filter
+        with:
+          filters: |
+            frontend:
+              - 'frontend/**'
+            backend:
+              - 'backend/**'
+            infra:
+              - 'infrastructure/**'
+            docs-only:
+              - 'docs/**'
+
+  # ──────────────────────────────────────────────
+  #  VALIDATIONS via Reusable Workflow
+  # ──────────────────────────────────────────────
+  validate:
+    name: Validate ${{ matrix.component }}
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.docs-only != 'true'
+    strategy:
+      matrix:
+        component:
+          - frontend
+          - backend
+    uses: ./.github/workflows/reusable-validations.yml
+    with:
+      component: ${{ matrix.component }}
+      lint-enabled: true
+
+  # ──────────────────────────────────────────────
+  #  TESTING — Matrix Strategy (OS x Node)
+  # ──────────────────────────────────────────────
+  test:
+    name: Test ${{ matrix.component }} (${{ matrix.os }}, Node ${{ matrix.node-version }})
+    needs: [detect-changes]
+    if: needs.detect-changes.outputs.docs-only != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        component:
+          - frontend
+          - backend
+        os:
+          - ubuntu-latest
+          - windows-latest
+        node-version:
+          - "18"
+          - "20"
+        include:
+          - os: ubuntu-latest
+            node-version: "22"
+            component: backend
+        exclude:
+          - os: windows-latest
+            node-version: "18"
+            component: frontend
+    uses: ./.github/workflows/reusable-testing.yml
+    with:
+      component: ${{ matrix.component }}
+      os: ${{ matrix.os }}
+      node-version: ${{ matrix.node-version }}
+    secrets:
+      codecov-token: ${{ secrets.CODECOV_TOKEN }}
+
+  # ──────────────────────────────────────────────
+  #  COMPILATION / BUILD
+  # ──────────────────────────────────────────────
+  compile:
+    name: Build ${{ matrix.component }}
+    needs: [detect-changes, test, validate]
+    if: needs.detect-changes.outputs.docs-only != 'true'
+    strategy:
+      matrix:
+        component:
+          - frontend
+          - backend
+    uses: ./.github/workflows/reusable-compilation.yml
+    with:
+      component: ${{ matrix.component }}
+      os: ubuntu-latest
+      node-version: ${{ env.NODE_VERSION }}
+
+  # ──────────────────────────────────────────────
+  #  DEPLOY — Staging
+  # ──────────────────────────────────────────────
+  deploy-staging:
+    name: Deploy to staging
+    needs: [compile, detect-changes]
+    if: github.ref == 'refs/heads/main' && needs.detect-changes.outputs.docs-only != 'true'
+    environment:
+      name: staging
+      url: https://staging.example.com
+    runs-on: self-hosted
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4.1.9
+        with:
+          pattern: build-*
+          merge-multiple: true
+
+      - name: Deploy to staging
+        run: echo "Deploying to staging environment..."
+
+  # ──────────────────────────────────────────────
+  #  DEPLOY — Production (requires approval)
+  # ──────────────────────────────────────────────
+  deploy-production:
+    name: Deploy to production
+    needs: [deploy-staging, detect-changes]
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://production.example.com
+    runs-on: self-hosted
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4.1.9
+        with:
+          pattern: build-*
+          merge-multiple: true
+
+      - name: Deploy to production
+        run: echo "Deploying to production environment..."
+
+  # ──────────────────────────────────────────────
+  #  REPORTING — Markdown Summary
+  # ──────────────────────────────────────────────
+  report:
+    name: Generate pipeline summary
+    needs: [detect-changes, test, compile, deploy-staging]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      checks: write
+
+    steps:
+      - name: Build summary
+        run: |
+          cat <<'EOF' >> $GITHUB_STEP_SUMMARY
+          # Pipeline Report
+
+          ## Changed Components
+          - Frontend: ${{ needs.detect-changes.outputs.frontend }}
+          - Backend: ${{ needs.detect-changes.outputs.backend }}
+          - Infrastructure: ${{ needs.detect-changes.outputs.infra }}
+          - Docs only: ${{ needs.detect-changes.outputs.docs-only }}
+
+          ## Test Results
+          ${{ needs.test.result == 'success' && '✅ All tests passed' || '❌ Some tests failed' }}
+
+          ## Build Status
+          ${{ needs.compile.result == 'success' && '✅ Builds successful' || '❌ Build failed' }}
+
+          ## Deployments
+          - Staging: ${{ needs.deploy-staging.result }}
+          EOF
+
+      - name: Upload pipeline report
+        uses: actions/upload-artifact@v4.6.1
+        with:
+          name: pipeline-report-${{ github.sha }}
+          path: ${{ github.workspace }}
+          if-no-files-found: ignore

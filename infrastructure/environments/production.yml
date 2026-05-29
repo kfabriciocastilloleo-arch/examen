@@ -1,0 +1,8 @@
+name: production
+url: https://production.example.com
+deployment_branch: main
+protected: true
+required_reviewers:
+  - devops-leads
+  - security-team
+deployment_wait_time: 10m

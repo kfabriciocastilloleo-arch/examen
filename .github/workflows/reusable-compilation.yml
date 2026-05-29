@@ -1,0 +1,58 @@
+name: Reusable - Compilation
+
+on:
+  workflow_call:
+    inputs:
+      component:
+        required: true
+        type: string
+      os:
+        required: false
+        type: string
+        default: ubuntu-latest
+      node-version:
+        required: false
+        type: string
+        default: "20"
+    outputs:
+      artifact-name:
+        description: "Name of the uploaded build artifact"
+        value: ${{ jobs.compile.outputs.artifact-name }}
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    name: Build ${{ inputs.component }}
+    runs-on: ${{ inputs.os }}
+    outputs:
+      artifact-name: build-${{ inputs.component }}-${{ github.sha }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node
+        uses: actions/setup-node@v4.1.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: npm
+          cache-dependency-path: ${{ inputs.component }}/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: ${{ inputs.component }}
+
+      - name: Build
+        run: npm run build
+        working-directory: ${{ inputs.component }}
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4.6.1
+        with:
+          name: build-${{ inputs.component }}-${{ github.sha }}
+          path: ${{ inputs.component }}/dist/
+          if-no-files-found: warn
