@@ -155,6 +155,21 @@ jobs:
       checks: write
 
     steps:
+      - name: Resolve status messages
+        id: status
+        run: |
+          TEST="${{ needs.test.result }}"
+          COMPILE="${{ needs.compile.result }}"
+          DEPLOY="${{ needs.deploy-staging.result }}"
+
+          [ "$TEST" = success ] && TS="Passed" || { [ "$TEST" = skipped ] && TS="Skipped (no changes)" || TS="Failed"; }
+          [ "$COMPILE" = success ] && CS="Successful" || { [ "$COMPILE" = skipped ] && CS="Skipped (no changes)" || CS="Failed"; }
+          [ "$DEPLOY" = success ] && DS="Deployed" || { [ "$DEPLOY" = skipped ] && DS="Skipped (no deploy needed)" || DS="$DEPLOY"; }
+
+          echo "test=$TS" >> "$GITHUB_OUTPUT"
+          echo "compile=$CS" >> "$GITHUB_OUTPUT"
+          echo "deploy=$DS" >> "$GITHUB_OUTPUT"
+
       - name: Build summary
         run: |
           cat <<'EOF' >> $GITHUB_STEP_SUMMARY
@@ -167,13 +182,13 @@ jobs:
           - Docs only: ${{ needs.detect-changes.outputs.docs-only }}
 
           ## Test Results
-          ${{ needs.test.result == 'success' && 'Tests passed' || 'Tests failed' }}
+          ${{ steps.status.outputs.test }}
 
           ## Build Status
-          ${{ needs.compile.result == 'success' && 'Builds successful' || 'Build failed' }}
+          ${{ steps.status.outputs.compile }}
 
           ## Deployments
-          - Staging: ${{ needs.deploy-staging.result }}
+          - Staging: ${{ steps.status.outputs.deploy }}
           EOF
 
       - name: Upload pipeline report
